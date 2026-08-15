@@ -1132,6 +1132,8 @@ function nextBFSStep(){
   if(bfsStepState.currentLevel >= layers.length){
     finalizeBFS(path, layers, a, b, animationToken);
     bfsStepBtn.style.display = 'none';
+  } else {
+    // nothing: wait for user to click to proceed to next level
   }
 }
 
