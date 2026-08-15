@@ -624,6 +624,7 @@ footer p { color: var(--text-muted); font-size: 0.82rem; }
       <div class="viz-toolbar">
         <button id="btnRandom">Random Pair</button>
         <button id="btnDemo">5-Hop Demo</button>
+        <button id="btnNextLevel" class="btn-outline" style="display:none;">Next Level</button>
         <button class="btn-outline" id="btnReset">Reset</button>
         <span class="hint">Click two nodes to compute the path</span>
       </div>
@@ -781,7 +782,7 @@ nodes.forEach(n => nodeState[n.id] = 'normal');
 let highlightEdgeSet = null; // Set of "a-b" strings when a path is highlighted
 const nodeLayerColor = {}; // id -> hex color, assigned per BFS level while animating
 const revealEdges = new Map(); // edgeKey -> {a,b,color,start} — BFS tree edges revealed as the wave grows
-const growDuration = 850; // ms it takes an edge to "flow in" from source to target
+const growDuration = 220; // ms it takes an edge to "flow in" from source to target
 
 function edgeKey(a,b){ return a<b ? a+'-'+b : b+'-'+a; }
 
@@ -1061,75 +1062,101 @@ function onNodeClick(id){
 }
 
 let animationToken = 0;
+let bfsStepState = null;
+const bfsStepBtn = document.getElementById('btnNextLevel');
 
-function runBFSDemo(a,b){
-  const {path, layers, prev} = bfsPath(a,b);
-  animationToken++;
-  const myToken = animationToken;
-  if(!path){
-    resetVisualState();
-    render();
-    resultBox.innerHTML = `No path between <b>${a}</b> and <b>${b}</b> in this graph. Try another pair.`;
-    return;
-  }
-  bfsCard.style.display='none';
-  resultBox.innerHTML = `<span style="color:var(--text-muted)">Running BFS from <b style="color:#fff">${a}</b>…</span>`;
-  animateBFS(layers, path, a, b, myToken, prev);
-}
+function showBFSLevel(level){
+  if(!bfsStepState) return;
+  const {layers, path, a, b, prev} = bfsStepState;
+  if(level < 0 || level >= layers.length) return;
 
-function animateBFS(layers, path, a, b, token, prev){
-  // start everything dimmed/unreached so the expanding wave is visible against a quiet background
   nodes.forEach(n => nodeState[n.id] = 'unreached');
   highlightEdgeSet = null;
   revealEdges.clear();
   bfsCard.style.display = 'block';
   bfsVis.innerHTML = '';
 
-  const manyLayers = layers.length > 6 || nodes.length > 1500;
-  const stepDelay = manyLayers ? 650 : 1000;
-  let i = 0;
-
-  function step(){
-    if(token !== animationToken) return; // a newer BFS run started, cancel this one
-    if(i > 0){
-      // settle the previous layer from bright "visiting" to its calmer level color
-      layers[i-1].forEach(id => { if(nodeState[id] === 'visiting') nodeState[id] = 'visited'; });
-    }
-    if(i < layers.length){
-      const color = layerColor(i);
-      layers[i].forEach(id => {
-        nodeLayerColor[id] = color;
-        nodeState[id] = (id===a && i===0) ? 'endpoint' : 'visiting';
-        if(i > 0 && prev[id] !== undefined){
-          revealEdges.set(edgeKey(prev[id], id), {a: prev[id], b: id, color, start: performance.now()});
-        }
-      });
-      ensureGrowLoop();
-      render();
-      resultBox.innerHTML = `<span style="color:var(--text-muted)">Running BFS…</span> exploring level <span class="steps">${i}</span> (${layers[i].length} node${layers[i].length===1?'':'s'})`;
-
-      // live "options in front of it" — the candidate nodes this level just reached
-      const chips = layers[i].map(id=>{
-        const isTarget = id===b;
-        const style = isTarget
-          ? `background:var(--amber);color:var(--deep);font-weight:600;`
-          : `background:${color};color:#021e2c;font-weight:600;opacity:0.9;`;
-        return `<span class="chip" style="${style}">${id}</span>`;
-      }).join(' ');
-      const row = document.createElement('div');
-      row.className = 'bfs-layer';
-      row.innerHTML = `<span class="tag" style="color:${color}">Level ${i}</span>${chips}`;
-      bfsVis.appendChild(row);
-      bfsVis.scrollTop = bfsVis.scrollHeight;
-
-      i++;
-      setTimeout(step, stepDelay);
-    } else {
-      finalizeBFS(path, layers, a, b, token);
-    }
+  for(let i = 0; i < level; i++){
+    const color = layerColor(i);
+    layers[i].forEach(id => {
+      nodeLayerColor[id] = color;
+      nodeState[id] = (id === a && i === 0) ? 'endpoint' : 'visited';
+      if(i > 0 && prev[id] !== undefined){
+        // mark previous levels' edges as already fully grown
+        revealEdges.set(edgeKey(prev[id], id), {a: prev[id], b: id, color, start: performance.now() - growDuration});
+      }
+    });
   }
-  step();
+
+  const color = layerColor(level);
+  layers[level].forEach(id => {
+    nodeLayerColor[id] = color;
+    nodeState[id] = (id===a && level===0) ? 'endpoint' : 'visiting';
+    if(level > 0 && prev[id] !== undefined){
+      revealEdges.set(edgeKey(prev[id], id), {a: prev[id], b: id, color, start: performance.now()});
+    }
+  });
+
+  ensureGrowLoop();
+  render();
+  resultBox.innerHTML = `<span style="color:var(--text-muted)">Level <span class="steps">${level}</span></span> · ${layers[level].length} node${layers[level].length===1?'':'s'} reached`;
+
+  const chips = layers[level].map(id=>{
+    const isTarget = id===b;
+    const style = isTarget
+      ? `background:var(--amber);color:var(--deep);font-weight:600;`
+      : `background:${color};color:#021e2c;font-weight:600;opacity:0.9;`;
+    return `<span class="chip" style="${style}">${id}</span>`;
+  }).join(' ');
+
+  const row = document.createElement('div');
+  row.className = 'bfs-layer';
+  row.innerHTML = `<span class="tag" style="color:${color}">Level ${level}</span>${chips}`;
+  bfsVis.appendChild(row);
+  bfsVis.scrollTop = bfsVis.scrollHeight;
 }
+
+function nextBFSStep(){
+  if(!bfsStepState) return;
+  const {layers, path, a, b} = bfsStepState;
+
+  if(bfsStepState.currentLevel >= layers.length){
+    finalizeBFS(path, layers, a, b, animationToken);
+    bfsStepBtn.style.display = 'none';
+    return;
+  }
+
+  showBFSLevel(bfsStepState.currentLevel);
+  bfsStepState.currentLevel += 1;
+
+  if(bfsStepState.currentLevel >= layers.length){
+    finalizeBFS(path, layers, a, b, animationToken);
+    bfsStepBtn.style.display = 'none';
+  }
+}
+
+function runBFSDemo(a,b){
+  const {path, layers, prev} = bfsPath(a,b);
+  animationToken++;
+  const myToken = animationToken;
+  if(!path){
+    bfsStepState = null;
+    if(bfsStepBtn) bfsStepBtn.style.display = 'none';
+    resetVisualState();
+    render();
+    resultBox.innerHTML = `No path between <b>${a}</b> and <b>${b}</b> in this graph. Try another pair.`;
+    return;
+  }
+
+  bfsStepState = {a, b, path, layers, prev, currentLevel: 0, token: myToken};
+  bfsCard.style.display='block';
+  resultBox.innerHTML = `<span style="color:var(--text-muted)">BFS ready — click <b style="color:#fff">Next Level</b> to explore one layer at a time.</span>`;
+  bfsStepBtn.style.display = 'inline-flex';
+  bfsStepBtn.textContent = 'Next Level';
+  showBFSLevel(0);
+}
+
+bfsStepBtn.addEventListener('click', nextBFSStep);
 
 function finalizeBFS(path, layers, a, b, token){
   if(token !== animationToken) return;
@@ -1154,6 +1181,7 @@ document.getElementById('btnReset').onclick = ()=>{
   render();
   resultBox.textContent='Select a first node…';
   bfsCard.style.display='none';
+  if(bfsStepBtn) bfsStepBtn.style.display = 'none';
 };
 document.getElementById('btnRandom').onclick = ()=>{
   const ids = nodes.map(n=>n.id);
